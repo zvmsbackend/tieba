@@ -1,4 +1,3 @@
 __pycache__
 *.html
-cookies.json
-data.json
+*.json

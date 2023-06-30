@@ -15,10 +15,14 @@ $ python3 tieba.py <tid> <filename>
 ## 这个页面太丑了, 我想换一个
 
 1. 修改`tieba.py`内的`write_file`函数
-2. 运行`data2html.py`
+2. 运行`json2html.py`
 
 ## 安全验证???
 
 1. 访问浏览器, 进行人工安全验证
 2. 打开DevTools, 把页面请求的Cookies复制下来
 3. 运行`cookies2json.py`
+
+## `-t`和`-p`选项是干什么的?
+
+用来刷帖的, 懒得说了
