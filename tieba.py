@@ -10,6 +10,9 @@ import bs4
 import requests
 from bs4.element import Tag
 
+def inner_html(tag: Tag):
+    return ''.join(map(str.strip, map(str, tag.contents)))
+
 def make_baidu_soup(url: str) -> bs4.BeautifulSoup:
     res = requests.get(url, cookies=cookies)
     soup = bs4.BeautifulSoup(res.content.decode(), 'lxml')
@@ -20,8 +23,8 @@ def make_baidu_soup(url: str) -> bs4.BeautifulSoup:
 def prettify_tag(tag: Tag):
     return re.sub('\n+', '\n', tag.get_text().strip())
 
-def get_total_comments(tid: int) -> dict:
-    res = requests.get('https://tieba.baidu.com/p/totalComment?tid={}'.format(tid))
+def get_total_comments(tid: int, pn: int, see_lz: bool) -> dict:
+    res = requests.get('https://tieba.baidu.com/p/totalComment?tid={}&pn={}&see_lz={}'.format(tid, pn, int(see_lz)))
     data = json.loads(res.content.decode())['data']
     return {
         'comment_list': defaultdict(partial(defaultdict, list), data['comment_list']),
@@ -44,18 +47,22 @@ def determine_filename(title: str, filename: str | None) -> str:
         filename += '.html'
     return filename
 
-def crawl_page(tid: int, pn: int, total_comments: dict, result: list, return_total_title_and_page: bool = False) -> int:
+def crawl_page(tid: int, pn: int, result: list, see_lz: bool, return_total_title_and_page: bool = False) -> int:
     print('开始爬取第', pn, '页')
-    soup = make_baidu_soup('https://tieba.baidu.com/p/{}?pn={}'.format(tid, pn))
+    soup = make_baidu_soup('https://tieba.baidu.com/p/{}?pn={}&see_lz={}'.format(tid, pn, int(see_lz)))
+    total_comments = get_total_comments(tid, pn, see_lz)
     result[pn - 1] = [
         {
             'author': {
                 'icon': (lambda img: img['src' if not img['src'].startswith('//') else 'data-tb-lazyload'])(div.find('li', class_='icon').img),
-                'name': div.find('li', class_='d_name').a.get_text()
+                'name': inner_html(div.find('li', class_='d_name').a),
+                'title': div.find('div', class_='d_badge_title').string,
+                'level': int(div.find('div', class_='d_badge_lv').string)
             },
-            'content': ''.join(map(str.strip, map(str, div.find('div', class_='d_post_content j_d_post_content').contents))),
-            'ip': div.find('div', class_='post-tail-wrap').span.string[5:],
-            'time': div.find('div', class_='post-tail-wrap').find_all('span', class_='tail-info')[-1].string,
+            'content': inner_html(div.find('div', class_='d_post_content j_d_post_content')),
+            'ip': tail.span.get_text()[5:],
+            'time': tail_info[-1].string,
+            'index': int(re.search(r'\d+', tail_info[1].string).group(0)),
             'comments': [ 
                 {
                     'author': comment['show_nickname'],
@@ -65,12 +72,13 @@ def crawl_page(tid: int, pn: int, total_comments: dict, result: list, return_tot
                 for comment in total_comments['comment_list'][div['data-pid']]['comment_info']
             ]
         }
-        for div in soup.find_all('div', class_='l_post l_post_bright j_l_post clearfix')
+        for div in soup.find_all('div', class_='l_post l_post_bright j_l_post clearfix') 
+        if (tail := div.find('div', class_='post-tail-wrap')) and (tail_info := tail.find_all('span', class_='tail-info'))
     ]
     print('第', pn, '页爬取完成')
     if return_total_title_and_page:
         return (
-            soup.find('h3', class_='core_title_txt').string.strip(),
+            soup.find(class_='core_title_txt').string.strip(),
             int(soup.find('li', class_='l_reply_num').find_all('span')[1].string)
         )
     
@@ -108,11 +116,12 @@ def write_file(title: str, result: list, filename: str):
 <div class="col-2">
     <img style="width: 80px; height: 80px;" src="{}">
     <p>{}</p>
+    <p>{} {}</p>
 </div>
 <div class="col">
     <blockquote class="blockquote">
         {}
-        <footer class="blockquote-footer"><small>IP属地: {} {}</small></footer>
+        <footer class="blockquote-footer"><small>IP属地: {} {}楼 {}</small></footer>
     </blockquote>
     <ul class="list-group">
     {}
@@ -122,8 +131,11 @@ def write_file(title: str, result: list, filename: str):
 <hr>""".format(
                             lou['author']['icon'],
                             lou['author']['name'],
+                            lou['author']['title'],
+                            lou['author']['level'],
                             lou['content'],
                             lou['ip'],
+                            lou['index'],
                             lou['time'],
                             '\n'.join(
                                 """<li class="list-group-item">
@@ -157,21 +169,20 @@ def roam_tieba(kw: str, pn: int):
         for i, tie in enumerate(ties)
     )))
     tid = int(ties[selection]['data-tid'])
-    main(tid, None)
+    main(tid, None, False)
 
-def main(tid: int, filename: str | None) -> None:
-    total_comments = get_total_comments(tid)
+def main(tid: int, filename: str | None, see_lz: bool) -> None:
     result = [None]
-    title, total_page = crawl_page(tid, 1, total_comments, result, True)
+    title, total_page = crawl_page(tid, 1, result, see_lz, True)
     print('爬取', title, ', 共', total_page, '页')
-    result.extend([None] * (total_page - 2))
+    result.extend([None] * (total_page - 1))
     threads = []
-    for i in range(2, total_page):
+    for i in range(2, total_page + 1):
         thread = Thread(target=crawl_page, args=(
             tid,
             i,
-            total_comments,
-            result
+            result,
+            see_lz
         ))
         thread.start()
         threads.append(thread)
@@ -188,10 +199,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('tid', type=int, nargs='?')
     parser.add_argument('filename', nargs='?')
-    parser.add_argument('-t')
-    parser.add_argument('-p', type=int)
+    parser.add_argument('-l', '--see-lz', action='store_true')
+    parser.add_argument('-t', '--tieba')
+    parser.add_argument('-p', '--pn', type=int, default=0)
     args = parser.parse_args()
-    if args.t is not None:
-        roam_tieba(args.t, args.p or 0)
+    if args.tieba is not None:
+        roam_tieba(args.tieba, args.pn)
     else:
-        main(args.tid, args.filename)
+        main(args.tid, args.filename, args.see_lz)
