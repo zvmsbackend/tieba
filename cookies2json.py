@@ -3,7 +3,7 @@ import json
 
 import pyperclip
 
-cookies = pyperclip.paste()
+cookies = re.sub('^Cookie:\s+', '', pyperclip.paste())
 json.dump(
     {
         match.group(1).strip(): match.group(2).strip()
