@@ -47,11 +47,11 @@ except OSError:
     cookies = {}
 
 
-def determine_filename(title: str, filename: str | None) -> str:
+def determine_filename(title: str, filename: str | None, see_lz: bool) -> str:
     if filename is None:
         filename = input('文件路径: ')
         if not filename:
-            return title + '.html'
+            return f'{title}{"-只看楼主" if see_lz else ""}.html'
     if os.path.isdir(filename):
         return f'{filename}/{title}.html'
     if not filename.endswith('.html'):
@@ -232,8 +232,8 @@ def main(tid: int, filename: str | None, see_lz: bool, img_mode: str, img_task_s
     json.dump({
         'title': title,
         'result': result
-    }, open(f'{tid}.json', 'w', encoding='utf-8'), ensure_ascii=False, indent=4)
-    filename = determine_filename(title, filename)
+    }, open(f'{tid}{"-lz" if see_lz else ""}.json', 'w', encoding='utf-8'), ensure_ascii=False, indent=4)
+    filename = determine_filename(title, filename, see_lz)
     write_file(tid, title, result, filename, img_mode, img_task_size)
     if browser:
         webbrowser.open(filename)
