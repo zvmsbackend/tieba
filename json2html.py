@@ -10,7 +10,7 @@ parser.add_argument('-s', '--separate', action='store_true', help='是否给下�
 parser.add_argument('-n', '--img-task-size', type=int, default=100, help='下载图片时一次启动多少个线程')
 args = parser.parse_args()
 
-data = json.load(open('{}.json'.format(args.tid), encoding='utf-8'))
+data = json.load(open(f'{args.tid}.json', encoding='utf-8'))
 tieba.write_file(
     args.tid,
     data['title'], 

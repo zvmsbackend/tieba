@@ -33,7 +33,7 @@ def prettify_tag(tag: Tag) -> str:
 
 def get_total_comments(tid: int, pn: int, see_lz: bool) -> dict:
     res = requests.get(
-        'https://tieba.baidu.com/p/totalComment?tid={}&pn={}&see_lz={}'.format(tid, pn, int(see_lz)))
+        f'https://tieba.baidu.com/p/totalComment?tid={tid}&pn={pn}&see_lz={int(see_lz)}')
     data = json.loads(res.content.decode())['data']
     return {
         'comment_list': defaultdict(partial(defaultdict, list), data['comment_list']),
@@ -53,7 +53,7 @@ def determine_filename(title: str, filename: str | None) -> str:
         if not filename:
             return title + '.html'
     if os.path.isdir(filename):
-        return '{}/{}.html'.format(filename, title)
+        return f'{filename}/{title}.html'
     if not filename.endswith('.html'):
         filename += '.html'
     return filename
@@ -61,7 +61,7 @@ def determine_filename(title: str, filename: str | None) -> str:
 
 def crawl_extra_comments(tid: int, pid: str, pn: int, pages: list) -> None:
     res = requests.get(
-        'https://tieba.baidu.com/p/comment?tid={}&pid={}&pn={}'.format(tid, pid, pn))
+        f'https://tieba.baidu.com/p/comment?tid={tid}&pid={pid}&pn={pn}')
     soup = bs4.BeautifulSoup(res.content.decode(), 'lxml')
     pages[pn - 1] = [
         {
@@ -110,7 +110,7 @@ def get_comments(tid: int, pid: str, total_comments: dict) -> list[list[dict]]:
 def crawl_page(tid: int, pn: int, result: list, see_lz: bool, return_total_title_and_page: bool) -> int:
     print('开始爬取第', pn, '页')
     soup = make_baidu_soup(
-        'https://tieba.baidu.com/p/{}?pn={}&see_lz={}'.format(tid, pn, int(see_lz)))
+        f'https://tieba.baidu.com/p/{tid}?pn={pn}&see_lz={int(see_lz)}')
     total_comments = get_total_comments(tid, pn, see_lz)
     result[pn - 1] = [
         {
@@ -124,7 +124,7 @@ def crawl_page(tid: int, pn: int, result: list, see_lz: bool, return_total_title
             'content': inner_html(div.find('div', class_='d_post_content j_d_post_content')),
             'ip': tail.span.get_text()[5:],
             'time': tail_info[-1].string,
-            'index': int(re.search(r'\d+', tail_info[1].string).group(0)),
+            'index': int(re.search(r'\d+', tail.find(string=re.compile(r'\d+楼')).string).group(0)),
             'comments': get_comments(tid, div['data-pid'], total_comments)
         }
         for div in soup.find_all('div', class_='l_post l_post_bright j_l_post clearfix')
@@ -169,19 +169,6 @@ def download_imgs(imgs: ResultSet, dir: str, img_task_size: int) -> None:
             threads.append(thread)
         for thread in threads:
             thread.join()
-
-
-def format_comments(comments: list[dict]) -> str:
-    return ''.join(
-        """<li class="list-group-item">
-<img style="width: 32px; height: 32px;" src="{}">{}: {}
-</li>""".format(
-            comment['icon'],
-            comment['author'],
-            comment['content']
-        )
-        for comment in comments
-    )
 
 
 def write_file(tid: int, title: str, result: list, filename: str, img_mode: str, img_task_size: int) -> None:
@@ -245,7 +232,7 @@ def main(tid: int, filename: str | None, see_lz: bool, img_mode: str, img_task_s
     json.dump({
         'title': title,
         'result': result
-    }, open('{}.json'.format(tid), 'w', encoding='utf-8'), ensure_ascii=False, indent=4)
+    }, open(f'{tid}.json', 'w', encoding='utf-8'), ensure_ascii=False, indent=4)
     filename = determine_filename(title, filename)
     write_file(tid, title, result, filename, img_mode, img_task_size)
     if browser:
