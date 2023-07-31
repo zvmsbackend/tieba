@@ -177,7 +177,6 @@ def write_file(tid: int, title: str, result: list, filename: str, img_mode: str,
     soup = bs4.BeautifulSoup(template.render(
         range=range,
         len=len,
-        max=max,
         min=min,
         enumerate=enumerate,
         title=title,

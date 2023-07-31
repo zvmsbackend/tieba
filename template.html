@@ -346,7 +346,9 @@
             </a>
             <div id="list" class="list-group">
                 {% for i, page in enumerate(result) %}
+                {% if page %}
                 <a class="list-group-item list-group-item-action" href="#_{{i}}">第{{i + 1}}页 {{page[0].index}}楼</a>
+                {% endif %}
                 {% endfor %}
             </div>
         </div>
