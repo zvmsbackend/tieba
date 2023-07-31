@@ -1,42 +1,51 @@
-import re
-import json
+from collections import defaultdict
+from datetime import datetime
+from functools import partial
+from threading import Thread
+import webbrowser
+import argparse
 import os.path
 import hashlib
-import argparse
-from threading import Thread
-from functools import partial
-from datetime import datetime
-from collections import defaultdict
+import json
+import re
 
-import bs4
-import requests
 from bs4.element import Tag, ResultSet
+import requests
+import jinja2
+import bs4
+
 
 def inner_html(tag: Tag) -> str:
     return ''.join(map(str.strip, map(str, tag.contents)))
+
 
 def make_baidu_soup(url: str) -> bs4.BeautifulSoup:
     res = requests.get(url, cookies=cookies)
     soup = bs4.BeautifulSoup(res.content.decode(), 'lxml')
     if soup.title.string == '百度安全验证':
-        raise Exception('百度安全验证')
+        raise RuntimeError('百度安全验证')
     return soup
+
 
 def prettify_tag(tag: Tag) -> str:
     return re.sub('\n+', '\n', tag.get_text().strip())
 
+
 def get_total_comments(tid: int, pn: int, see_lz: bool) -> dict:
-    res = requests.get('https://tieba.baidu.com/p/totalComment?tid={}&pn={}&see_lz={}'.format(tid, pn, int(see_lz)))
+    res = requests.get(
+        'https://tieba.baidu.com/p/totalComment?tid={}&pn={}&see_lz={}'.format(tid, pn, int(see_lz)))
     data = json.loads(res.content.decode())['data']
     return {
         'comment_list': defaultdict(partial(defaultdict, list), data['comment_list']),
         'user_list': data['user_list']
     }
-    
+
+
 try:
     cookies = json.load(open('cookies.json', encoding='utf-8'))
 except OSError:
     cookies = {}
+
 
 def determine_filename(title: str, filename: str | None) -> str:
     if filename is None:
@@ -49,8 +58,10 @@ def determine_filename(title: str, filename: str | None) -> str:
         filename += '.html'
     return filename
 
+
 def crawl_extra_comments(tid: int, pid: str, pn: int, pages: list) -> None:
-    res = requests.get('https://tieba.baidu.com/p/comment?tid={}&pid={}&pn={}'.format(tid, pid, pn))
+    res = requests.get(
+        'https://tieba.baidu.com/p/comment?tid={}&pid={}&pn={}'.format(tid, pid, pn))
     soup = bs4.BeautifulSoup(res.content.decode(), 'lxml')
     pages[pn - 1] = [
         {
@@ -62,12 +73,13 @@ def crawl_extra_comments(tid: int, pid: str, pn: int, pages: list) -> None:
         for li in soup.find_all('li', class_='lzl_single_post')
     ]
 
+
 def get_comments(tid: int, pid: str, total_comments: dict) -> list[list[dict]]:
     comments = total_comments['comment_list'][pid]
-    pages =  [[ 
+    pages = [[
         {
             'author': comment['show_nickname'],
-            'icon': ('https://gss0.bdstatic.com/6LZ1dD3d1sgCo2Kml5_Y_D3/sys/portrait/item/' + 
+            'icon': ('https://gss0.bdstatic.com/6LZ1dD3d1sgCo2Kml5_Y_D3/sys/portrait/item/' +
                      total_comments['user_list'][str(comment['user_id'])]['portrait']),
             'content': comment['content'],
             'time': datetime.fromtimestamp(comment['now_time']).strftime('%Y-%m-%d %H:%M')
@@ -94,9 +106,11 @@ def get_comments(tid: int, pid: str, total_comments: dict) -> list[list[dict]]:
             thread.join()
     return pages
 
+
 def crawl_page(tid: int, pn: int, result: list, see_lz: bool, return_total_title_and_page: bool) -> int:
     print('开始爬取第', pn, '页')
-    soup = make_baidu_soup('https://tieba.baidu.com/p/{}?pn={}&see_lz={}'.format(tid, pn, int(see_lz)))
+    soup = make_baidu_soup(
+        'https://tieba.baidu.com/p/{}?pn={}&see_lz={}'.format(tid, pn, int(see_lz)))
     total_comments = get_total_comments(tid, pn, see_lz)
     result[pn - 1] = [
         {
@@ -113,21 +127,24 @@ def crawl_page(tid: int, pn: int, result: list, see_lz: bool, return_total_title
             'index': int(re.search(r'\d+', tail_info[1].string).group(0)),
             'comments': get_comments(tid, div['data-pid'], total_comments)
         }
-        for div in soup.find_all('div', class_='l_post l_post_bright j_l_post clearfix') 
+        for div in soup.find_all('div', class_='l_post l_post_bright j_l_post clearfix')
         if (tail := div.find('div', class_='post-tail-wrap')) and (tail_info := tail.find_all('span', class_='tail-info'))
     ]
     print('第', pn, '页爬取完成')
     if return_total_title_and_page:
         return (
             soup.find(class_='core_title_txt').string.strip(),
-            int(soup.find('li', class_='l_reply_num').find_all('span')[1].string)
+            int(soup.find('li', class_='l_reply_num').find_all(
+                'span')[1].string)
         )
-    
+
+
 def download_img(dir: str, url: str, code: str) -> None:
     print('下载', url)
     res = requests.get(url)
     open(os.path.join(dir, code), 'wb').write(res.content)
-    
+
+
 def download_imgs(imgs: ResultSet, dir: str, img_task_size: int) -> None:
     if not os.path.exists(dir):
         os.mkdir(dir)
@@ -153,6 +170,7 @@ def download_imgs(imgs: ResultSet, dir: str, img_task_size: int) -> None:
         for thread in threads:
             thread.join()
 
+
 def format_comments(comments: list[dict]) -> str:
     return ''.join(
         """<li class="list-group-item">
@@ -164,123 +182,36 @@ def format_comments(comments: list[dict]) -> str:
         )
         for comment in comments
     )
-        
+
+
 def write_file(tid: int, title: str, result: list, filename: str, img_mode: str, img_task_size: int) -> None:
-    soup = bs4.BeautifulSoup(
-        """<html>
-<head>
-  <link rel="stylesheet" href="https://cdn.staticfile.org/twitter-bootstrap/5.1.1/css/bootstrap.min.css">
-</head>
-<body>
-    <div class="container" style="margin-top: 100px">
-        <h1 class="text-primary" id="top">{}</h1>
-        <div class="fixed-top">
-        {}
-        </div>
-        <div>
-        {}
-        </div>
-    </div>
-    <script>
-    for (const lou of document.querySelectorAll('div.lou')) {{
-        const btns = lou.querySelectorAll(`ul.pagination li.page-item`);
-        const pages = lou.querySelectorAll(`ul.list-group`);
-        for (const [i, btn] of btns.entries()) {{
-            btn.addEventListener('click', (e) => {{
-                for (const page of pages) {{
-                    page.style = 'display: none;';
-                }}
-                for (const btn of btns) {{
-                    btn.className = 'page-item';
-                }}
-                pages[i].style = 'display: block;';
-                btn.className = 'page-item active';
-            }});
-        }}
-    }}
-    </script>
-</body>
-</html>""".format(
-            title,
-            ''.join(
-                '<ul class="pagination" style="margin: 0px;">' + ''.join(
-                    '<li class="page-item"><a class="page-link" href="#_{}">{}</a></li>'.format(
-                        j, j + 1
-                    )
-                    for j in range(i * 20, i * 20 + 20)
-                ) + '</ul>'
-                for i in range(len(result) // 20)
-            ),
-            ''.join(
-                '<h4 id="_{}">第{}页</h4>{}'.format(
-                    i,
-                    i + 1,
-                    ''.join(
-                        """<div class="row">
-<div class="col-2">
-    <img style="width: 80px; height: 80px;" src="{}">
-    <p>{}</p>
-    <p>{} {}</p>
-</div>
-<div class="col{}">
-    <blockquote class="blockquote">
-        {}
-        <footer class="blockquote-footer"><small>IP属地: {} {}楼 {}</small></footer>
-    </blockquote>
-    {}
-</div>
-</div>
-<hr>""".format(
-                            lou['author']['icon'],
-                            lou['author']['name'],
-                            lou['author']['title'],
-                            lou['author']['level'],
-                            ' lou' if len(lou['comments']) > 1 else '',
-                            lou['content'],
-                            lou['ip'],
-                            lou['index'],
-                            lou['time'],
-                            '' if len(lou['comments']) == 0 else
-                            '<ul class=""list-group">{}</ul>'.format(
-                                format_comments(lou['comments'][0])
-                            ) if len(lou['comments']) == 1 else 
-                            '{}<ul class="pagination">{}</ul>'.format(
-                                ''.join(
-                                    '<ul class="list-group" style="display: {};">{}</ul>'.format(
-                                        'block' if j == 0 else 'none',
-                                        format_comments(comment)
-                                    )
-                                    for j, comment in enumerate(lou['comments'])
-                                ),
-                                ''.join(
-                                    '<li class="page-item{}"><a class="page-link">{}</a></li>'.format(
-                                        ' active' if j == 0 else '',
-                                        j + 1
-                                    )
-                                    for j in range(len(lou['comments']))
-                                )
-                            )
-                        )
-                        for lou in page
-                    )
-                )
-                for i, page in enumerate(result)
-            )
-        ), 'lxml'
-    )
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader('.'))
+    template = env.get_template('template.html')
+    soup = bs4.BeautifulSoup(template.render(
+        range=range,
+        len=len,
+        max=max,
+        min=min,
+        enumerate=enumerate,
+        title=title,
+        result=result
+    ), 'lxml')
     imgs = soup.find_all('img')
     for img in imgs:
         img['src'] = re.sub('^(//|http://)', 'https://', img['src'])
         if img['src'][0] == '/':
             img['src'] = 'https://tieba.baidu.com' + img['src']
     if img_mode != 'none':
-        download_imgs(imgs, 'imgs' if img_mode == 'download' else str(tid), img_task_size)
+        download_imgs(imgs, 'imgs' if img_mode ==
+                      'download' else str(tid), img_task_size)
     open(filename, 'w', encoding='utf-8').write(soup.prettify())
     print('写入', os.path.abspath(filename))
-    
-def roam_tieba(kw: str, pn: int, see_lz: bool, img_mode: str, img_task_size: int) -> None:
+
+
+def roam_tieba(kw: str, pn: int, see_lz: bool, img_mode: str, img_task_size: int, browser: bool) -> None:
     soup = make_baidu_soup('https://tieba.baidu.com/f?kw=' + kw)
-    ties = [tie for tie in soup.find('ul', id='thread_list').contents if tie.name == 'li' and tie.find('i', class_='icon-top') is None]
+    ties = [tie for tie in soup.find('ul', id='thread_list').contents if tie.name == 'li' and tie.find(
+        'i', class_='icon-top') is None]
     selection = int(input('\n'.join(
         '{}: {}\n{}'.format(
             i,
@@ -290,9 +221,10 @@ def roam_tieba(kw: str, pn: int, see_lz: bool, img_mode: str, img_task_size: int
         for i, tie in enumerate(ties)
     ) + '\n'))
     tid = int(ties[selection]['data-tid'])
-    main(tid, None, see_lz, img_mode)
+    main(tid, None, see_lz, img_mode, img_task_size, browser)
 
-def main(tid: int, filename: str | None, see_lz: bool, img_mode: str, img_task_size: int) -> None:
+
+def main(tid: int, filename: str | None, see_lz: bool, img_mode: str, img_task_size: int, browser: bool) -> None:
     result = [None]
     title, total_page = crawl_page(tid, 1, result, see_lz, True)
     print('爬取', title, ', 共', total_page, '页')
@@ -316,6 +248,9 @@ def main(tid: int, filename: str | None, see_lz: bool, img_mode: str, img_task_s
     }, open('{}.json'.format(tid), 'w', encoding='utf-8'), ensure_ascii=False, indent=4)
     filename = determine_filename(title, filename)
     write_file(tid, title, result, filename, img_mode, img_task_size)
+    if browser:
+        webbrowser.open(filename)
+
 
 def get_img_mode(args: argparse.Namespace) -> str:
     if args.download:
@@ -324,19 +259,26 @@ def get_img_mode(args: argparse.Namespace) -> str:
         return 'separate'
     return 'none'
 
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('tid', type=int, nargs='?', help='帖子的ID')
     parser.add_argument('filename', nargs='?', help='输出文件名')
     parser.add_argument('-l', '--see-lz', action='store_true', help='只看楼主')
     parser.add_argument('-d', '--download', action='store_true', help='下载图片文件')
+    parser.add_argument('-b', '--browser',
+                        action='store_true', help='结束以后打开浏览器')
     parser.add_argument('-t', '--tieba', help='要刷的贴吧名')
     parser.add_argument('-p', '--pn', type=int, default=0, help='要刷的贴吧的页数')
-    parser.add_argument('-s', '--separate', action='store_true', help='是否给下载的图片分配单独文件夹')
-    parser.add_argument('-n', '--img-task-size', type=int, default=100, help='下载图片时一次启动多少个线程')
+    parser.add_argument('-s', '--separate',
+                        action='store_true', help='是否给下载的图片分配单独文件夹')
+    parser.add_argument('-n', '--img-task-size', type=int,
+                        default=100, help='下载图片时一次启动多少个线程')
     args = parser.parse_args()
     img_mode = get_img_mode(args)
     if args.tieba is not None:
-        roam_tieba(args.tieba, args.pn, args.see_lz, img_mode, args.img_task_size)
+        roam_tieba(args.tieba, args.pn, args.see_lz,
+                   img_mode, args.img_task_size, args.browser)
     else:
-        main(args.tid, args.filename, args.see_lz, img_mode, args.img_task_size)
+        main(args.tid, args.filename, args.see_lz,
+             img_mode, args.img_task_size, args.browser)
